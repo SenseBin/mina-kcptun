@@ -1,0 +1,36 @@
+plugins {
+    id 'org.jetbrains.kotlin.jvm' version '1.9.25'
+    id 'java'
+}
+
+
+group 'io.github.sensbin.mina.kcp'
+version '1.0-SNAPSHOT'
+
+sourceSets {
+    main.java.srcDirs += 'src/main/kotlin'
+    test.java.srcDirs += 'src/test/kotlin'
+}
+compileKotlin {
+    kotlinOptions.jvmTarget = "17"
+}
+
+compileTestKotlin {
+    kotlinOptions.jvmTarget = "17"
+
+}
+sourceCompatibility = '17'
+targetCompatibility = '17'
+
+
+repositories {
+    mavenLocal()
+    mavenCentral()
+}
+
+dependencies {
+    implementation "org.jetbrains.kotlin:kotlin-stdlib"
+    implementation "org.jetbrains.kotlin:kotlin-reflect"
+    implementation group: 'commons-codec', name: 'commons-codec', version: '1.17.0'
+    implementation group: 'org.apache.mina', name: 'mina-core', version: '2.2.4'
+}
