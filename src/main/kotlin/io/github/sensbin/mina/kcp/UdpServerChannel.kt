@@ -1,83 +1,80 @@
 package io.github.sensbin.mina.kcp
 
-import kotlinx.coroutines.*
-import org.apache.mina.core.service.IoHandler
+import kotlinx.coroutines.channels.Channel as KChannel
+import org.apache.mina.core.buffer.IoBuffer
+import org.apache.mina.core.service.IoHandlerAdapter
 import org.apache.mina.core.session.IoSession
-import org.apache.mina.filter.codec.ProtocolCodecFilter
 import org.apache.mina.transport.socket.nio.NioDatagramAcceptor
 import java.net.InetSocketAddress
+import java.net.SocketAddress
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * 基于 MINA 的 UDP 服务器通道。
- * 支持 accept 新连接，返回 UdpChannel。
+ * 监听指定地址，并为每个新的远程地址创建一个 UdpChannel。
  */
 class UdpServerChannel(
-    private val localAddress: InetSocketAddress,
-    private val coroutineScope: CoroutineScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
-) : Channel {
-    private var acceptor: NioDatagramAcceptor? = null
-    private val acceptChannel = coroutineScope.channel<UdpChannel>()
-    override var isClosed = false
-        private set
+    override val localAddress: InetSocketAddress
+) : ServerChannel {
+
+    private val acceptor: NioDatagramAcceptor = NioDatagramAcceptor()
+    private val newChannels = KChannel<Channel>(KChannel.UNLIMITED)
+    private val establishedChannels = ConcurrentHashMap<SocketAddress, UdpChannel>()
+    private val closed = AtomicBoolean(false)
 
     init {
-        startMinaAcceptor()
+        acceptor.handler = ServerIoHandler()
+        acceptor.sessionConfig.isReuseAddress = true
+        acceptor.bind(localAddress)
     }
 
-    private fun startMinaAcceptor() {
-        acceptor = NioDatagramAcceptor()
-        acceptor!!.filterChain.addLast("codec", ProtocolCodecFilter())
-        acceptor!!.handler = object : IoHandler {
-            override fun sessionCreated(session: IoSession) {
-                // 为每个新会话创建一个 UdpChannel
-                val newChannel = UdpChannel(session.remoteAddress as InetSocketAddress, coroutineScope)
-                // 注意：这里需要将 session 绑定到 newChannel 的 MINA 逻辑中，简化版用通道模拟
-                coroutineScope.launch {
-                    acceptChannel.send(newChannel)
-                }
+    private inner class ServerIoHandler : IoHandlerAdapter() {
+        override fun messageReceived(session: IoSession, message: Any) {
+            val remoteAddress = session.remoteAddress
+            val channel = establishedChannels.computeIfAbsent(remoteAddress) {
+                val newChannel = UdpChannel(session, KChannel(KChannel.UNLIMITED))
+                newChannels.trySend(newChannel) // 将新 channel 放入 accept 队列
+                newChannel
             }
 
-            override fun sessionOpened(session: IoSession) {}
-            override fun sessionClosed(session: IoSession) {}
-            override fun messageReceived(session: IoSession, message: Any) {
-                // 服务器端消息转发逻辑可扩展
+            if (message is IoBuffer) {
+                val bytes = ByteArray(message.remaining())
+                message.get(bytes)
+                // 将数据发送到对应的 UdpChannel
+                channel.incomingMessages.trySend(bytes)
             }
-
-            override fun messageSent(session: IoSession, message: Any) {}
-            override fun exceptionCaught(session: IoSession, cause: Throwable) {
-                cause.printStackTrace()
-            }
-
-            override fun inputClosed(session: IoSession) {}
         }
-        acceptor!!.bind(localAddress)
-    }
 
-    /**
-     * 接受新连接，返回 UdpChannel。
-     */
-    suspend fun accept(): UdpChannel {
-        if (isClosed) throw IllegalStateException("Server channel is closed")
-        return acceptChannel.receive()
-    }
-
-    override suspend fun read(buffer: ByteArray, offset: Int, length: Int): Int {
-        // 服务器通道主要用于 accept，不直接读写
-        throw UnsupportedOperationException("Server channel does not support direct read")
-    }
-
-    override suspend fun write(buffer: ByteArray, offset: Int, length: Int): Int {
-        // 服务器通道主要用于 accept，不直接读写
-        throw UnsupportedOperationException("Server channel does not support direct write")
-    }
-
-    override suspend fun close() {
-        if (!isClosed) {
-            isClosed = true
-            acceptor?.unbind()
-            acceptor?.dispose()
-            acceptChannel.close()
-            coroutineScope.cancel()
+        override fun sessionClosed(session: IoSession) {
+            establishedChannels.remove(session.remoteAddress)?.close()
         }
+
+        override fun exceptionCaught(session: IoSession, cause: Throwable) {
+            // 简单打印异常，实际应用中应使用日志框架
+            cause.printStackTrace()
+            session.closeNow()
+        }
+    }
+
+    override suspend fun accept(): Channel {
+        if (isClosed()) {
+            throw IllegalStateException("Server channel is closed")
+        }
+        return newChannels.receive()
+    }
+
+    override fun close() {
+        if (closed.compareAndSet(false, true)) {
+            acceptor.unbind()
+            acceptor.dispose(true)
+            newChannels.close()
+            establishedChannels.values.forEach { it.close() }
+            establishedChannels.clear()
+        }
+    }
+
+    override fun isClosed(): Boolean {
+        return closed.get()
     }
 }

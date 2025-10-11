@@ -1,123 +1,98 @@
 package io.github.sensbin.mina.kcp
 
-import kotlinx.coroutines.*
-import org.apache.mina.core.future.ConnectFuture
-import org.apache.mina.core.service.IoHandler
-import org.apache.mina.core.session.IdleStatus
+import kotlinx.coroutines.channels.Channel as KChannel
+import org.apache.mina.core.buffer.IoBuffer
+import org.apache.mina.core.service.IoHandlerAdapter
 import org.apache.mina.core.session.IoSession
-import org.apache.mina.filter.FilterEvent
 import org.apache.mina.transport.socket.nio.NioDatagramConnector
-import java.net.InetSocketAddress
+import java.net.SocketAddress
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * 基于 MINA 的 UDP 通道实现（客户端）。
+ * 基于 MINA 的 UDP 通道实现。
+ *
+ * @param session MINA 的 IoSession
+ * @param incomingMessages 用于接收消息的 Kotlin Channel
  */
 class UdpChannel(
-    private val remoteAddress: InetSocketAddress,
-    private val coroutineScope: CoroutineScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    internal val session: IoSession,
+    internal val incomingMessages: KChannel<ByteArray>
 ) : Channel {
-    private var session: IoSession? = null
-    private val readChannel = coroutineScope.channel<ByteArray>()
-    private val writeChannel = coroutineScope.channel<ByteArray>()
-    private var closed = false
 
-    init {
-        startMinaConnector()
+    private val closed = AtomicBoolean(false)
+
+    override val remoteAddress: SocketAddress
+        get() = session.remoteAddress
+
+    override val localAddress: SocketAddress
+        get() = session.localAddress
+
+    override suspend fun read(buffer: ByteArray): Int {
+        if (isClosed()) {
+            return -1
+        }
+        val data = incomingMessages.receiveCatching().getOrNull() ?: return -1
+        data.copyInto(buffer)
+        return data.size
     }
 
-    private fun startMinaConnector() {
-        val connector = NioDatagramConnector()
-        connector.handler = object : IoHandler {
-            override fun sessionCreated(session: IoSession) {
-                this@UdpChannel.session = session
-                // 启动读写协程
-                coroutineScope.launch {
-                    handleReading()
+    override suspend fun write(buffer: ByteArray): Int {
+        if (isClosed()) {
+            throw IllegalStateException("Channel is closed")
+        }
+        val ioBuffer = IoBuffer.wrap(buffer)
+        session.write(ioBuffer)
+        return buffer.size
+    }
+
+    override fun close() {
+        if (closed.compareAndSet(false, true)) {
+            // UdpServerChannel 会管理 session 的关闭
+            // 如果是客户端主动关闭，则需要关闭 session
+            if (session.service is org.apache.mina.transport.socket.nio.NioDatagramConnector) {
+                session.closeNow()
+            }
+            incomingMessages.close()
+        }
+    }
+
+    override fun isClosed(): Boolean {
+        return closed.get() || !session.isActive
+    }
+
+    companion object {
+        /**
+         * 连接到远程 UDP 地址并创建一个 UdpChannel。
+         * @param remoteAddress 远程服务器地址
+         * @return UdpChannel 实例
+         */
+        fun connect(remoteAddress: SocketAddress): UdpChannel {
+            val connector = NioDatagramConnector()
+            val incomingMessages = KChannel<ByteArray>(KChannel.UNLIMITED)
+
+            connector.handler = object : IoHandlerAdapter() {
+                override fun messageReceived(session: IoSession, message: Any) {
+                    if (message is IoBuffer) {
+                        val bytes = ByteArray(message.remaining())
+                        message.get(bytes)
+                        incomingMessages.trySend(bytes)
+                    }
                 }
-                coroutineScope.launch {
-                    handleWriting()
+
+                override fun exceptionCaught(session: IoSession, cause: Throwable) {
+                    cause.printStackTrace()
+                    incomingMessages.close(cause)
+                    session.closeNow()
+                }
+
+                override fun sessionClosed(session: IoSession) {
+                    incomingMessages.close()
                 }
             }
 
-            override fun sessionOpened(session: IoSession) {}
-            override fun sessionClosed(session: IoSession) {
-                close()
-            }
-
-            override fun sessionIdle(session: IoSession?, status: IdleStatus?) {
-            }
-
-            override fun messageReceived(session: IoSession, message: Any) {
-                if (message is ByteArray) {
-                    readChannel.trySend(message)
-                }
-            }
-
-            override fun messageSent(session: IoSession, message: Any) {}
-            override fun exceptionCaught(session: IoSession, cause: Throwable) {
-                cause.printStackTrace()
-                close()
-            }
-
-            override fun inputClosed(session: IoSession) {}
-            override fun event(session: IoSession?, event: FilterEvent?) {
-            }
-        }
-
-        val future: ConnectFuture = connector.connect(remoteAddress)
-        future.await() // 阻塞等待连接
-        if (!future.isConnected) {
-            throw RuntimeException("Failed to connect to $remoteAddress")
+            val connectFuture = connector.connect(remoteAddress)
+            connectFuture.awaitUninterruptibly()
+            return UdpChannel(connectFuture.session, incomingMessages)
         }
     }
-
-    private suspend fun handleReading() {
-        try {
-            while (!closed) {
-                val data = readChannel.receive()
-                // 这里可以扩展为实际的 ByteArray 处理
-            }
-        } catch (e: Exception) {
-            if (!closed) e.printStackTrace()
-        }
-    }
-
-    private suspend fun handleWriting() {
-        try {
-            while (!closed) {
-                val data = writeChannel.receive()
-                session?.write(data)
-            }
-        } catch (e: Exception) {
-            if (!closed) e.printStackTrace()
-        }
-    }
-
-    override suspend fun read(buffer: ByteArray, offset: Int, length: Int): Int {
-        if (closed) throw IllegalStateException("Channel is closed")
-        // 模拟读取：实际中从 MINA session 读取，这里用协程通道简化
-        val data = readChannel.receiveOrNull() ?: ByteArray(0)
-        val actualLength = minOf(data.size, length)
-        System.arraycopy(data, 0, buffer, offset, actualLength)
-        return actualLength
-    }
-
-    override suspend fun write(buffer: ByteArray, offset: Int, length: Int): Int {
-        if (closed) throw IllegalStateException("Channel is closed")
-        val data = buffer.copyOfRange(offset, offset + length)
-        writeChannel.send(data)
-        return length
-    }
-
-    override suspend fun close() {
-        if (!closed) {
-            closed = true
-            session?.closeNow()
-            readChannel.close()
-            writeChannel.close()
-            coroutineScope.cancel()
-        }
-    }
-
-    override fun isClosed() = closed
 }
