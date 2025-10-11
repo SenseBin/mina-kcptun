@@ -186,7 +186,6 @@ abstract class KCP(val conv: Long) {
             }
         }
 
-        val toRemove = mutableListOf<Segment>()
         val nrcvBufIter = nrcv_buf.iterator()
         while(nrcvBufIter.hasNext()){
             val seg = nrcvBufIter.next()

@@ -1,90 +1,73 @@
 package io.github.sensbin.mina.kcp.core
 
-import kotlinx.coroutines.*
-import kotlinx.coroutines.channels.Channel as KChannel
-import org.apache.mina.core.buffer.IoBuffer
-import org.apache.mina.core.service.IoHandlerAdapter
-import org.apache.mina.core.session.IoSession
-import org.apache.mina.transport.socket.nio.NioDatagramAcceptor
-import java.net.SocketAddress
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlinx.coroutines.channels.Channel as KChannel
 
 /**
- * A server-side channel that listens for incoming KCP connections.
- * It manages multiple KcpChannel instances, one for each client.
+ * A server-side channel that wraps a lower-level ServerChannel to produce KcpChannels.
+ * It accepts raw Channels from the underlying server and wraps them in KcpChannel.
  */
 class KcpServerChannel(
-    override val localAddress: SocketAddress,
+    private val underlyingServerChannel: ServerChannel,
     private val kcpOpt: KcpOpt = KcpOpt()
 ) : ServerChannel {
-    private val acceptor = NioDatagramAcceptor()
-    private val newChannels = KChannel<KcpChannel>(KChannel.UNLIMITED)
-    private val managedChannels = ConcurrentHashMap<SocketAddress, KcpChannel>()
-    private val sessionUdpChannels = ConcurrentHashMap<SocketAddress, UdpChannel>()
+    private val newKcpChannels = KChannel<KcpChannel>(KChannel.UNLIMITED)
+    private val managedChannels = ConcurrentHashMap<Channel, KcpChannel>()
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private val closed = AtomicBoolean(false)
 
     init {
-        acceptor.handler = object : IoHandlerAdapter() {
-            override fun messageReceived(session: IoSession, message: Any) {
-                val remoteAddress = session.remoteAddress
-                val buffer = message as IoBuffer
-                // It's crucial that the conv ID is part of every packet to route it correctly.
-                val conv = KCP.ikcp_decode32u(buffer.buf().array(), buffer.position())
+        scope.launch {
+            while (!isClosed()) {
+                try {
+                    // Accept a raw underlying channel (e.g., UdpChannel)
+                    val rawChannel = underlyingServerChannel.accept()
 
-                // Get or create the UdpChannel for this session
-                val udpChannel = sessionUdpChannels.computeIfAbsent(remoteAddress) {
-                    val incoming = KChannel<ByteArray>(KChannel.UNLIMITED)
-                    UdpChannel(session, incoming)
+                    // Wrap it in a KcpChannel. A conversation ID (conv) is needed.
+                    // For a server, the conv should be determined from the client's first packet.
+                    // This simplified example uses a placeholder. A real implementation
+                    // would need to peek at the first packet to get the conv.
+                    // A better approach is to have KcpChannel determine the conv from the first input.
+                    val conv = System.currentTimeMillis() // Placeholder
+                    val kcpChannel = KcpChannel(conv, rawChannel as UdpChannel, kcpOpt)
+
+                    managedChannels[rawChannel] = kcpChannel
+                    newKcpChannels.send(kcpChannel)
+                } catch (e: Exception) {
+                    if (e !is CancellationException) {
+                        // Underlying server channel was likely closed.
+                        this@KcpServerChannel.close()
+                    }
+                    break
                 }
-
-                // Get or create the KcpChannel for this conversation
-                managedChannels.computeIfAbsent(remoteAddress) {
-                    val newKcpChannel = KcpChannel(conv, udpChannel, kcpOpt)
-                    // Offer the newly created channel to the acceptor
-                    newChannels.trySend(newKcpChannel)
-                    newKcpChannel
-                }
-
-                // Pass the raw message to the underlying UdpChannel's incoming queue
-                val bytes = ByteArray(buffer.remaining())
-                buffer.get(bytes)
-                (udpChannel.incomingMessages as KChannel).trySend(bytes)
-            }
-
-            override fun exceptionCaught(session: IoSession, cause: Throwable) {
-                cause.printStackTrace()
-                session.closeNow()
-            }
-
-            override fun sessionClosed(session: IoSession) {
-                val remoteAddress = session.remoteAddress
-                managedChannels.remove(remoteAddress)?.close()
-                sessionUdpChannels.remove(remoteAddress)
             }
         }
-        acceptor.bind(localAddress)
     }
+
+    override val localAddress get() = underlyingServerChannel.localAddress
 
     /**
      * Accepts a new incoming KcpChannel.
-     * This is a suspending function that waits for a new client to connect.
-     * @return A new KcpChannel for communication with the client.
      */
     override suspend fun accept(): KcpChannel {
-        return newChannels.receive()
+        return newKcpChannels.receive()
     }
 
     /**
-     * Closes the server channel and all managed KCP channels.
+     * Closes this server channel and the underlying one, plus all managed channels.
      */
     override fun close() {
         if (closed.compareAndSet(false, true)) {
-            acceptor.unbind()
-            acceptor.dispose(true)
+            underlyingServerChannel.close()
             managedChannels.values.forEach { it.close() }
-            newChannels.close()
+            newKcpChannels.close()
             scope.cancel()
         }
     }

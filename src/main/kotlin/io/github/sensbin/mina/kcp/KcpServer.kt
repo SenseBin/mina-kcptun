@@ -20,4 +20,15 @@ class KcpServer {
     fun bind(localAddress: SocketAddress, kcpOpt: KcpOpt = KcpOpt()): KcpServerChannel {
         return KcpServerChannel(localAddress, kcpOpt)
     }
+
+    /**
+     * Wraps an existing ServerChannel to produce KcpChannels.
+     *
+     * @param serverChannel The underlying server channel (e.g., a UdpServerChannel).
+     * @param kcpOpt KCP options that will be applied to all accepted channels.
+     * @return A configured KcpServerChannel.
+     */
+    fun wrap(serverChannel: ServerChannel, kcpOpt: KcpOpt = KcpOpt()): KcpServerChannel {
+        return KcpServerChannel(serverChannel, kcpOpt)
+    }
 }

@@ -1,8 +1,5 @@
 package io.github.sensbin.mina.kcp
 
-import io.github.sensbin.mina.kcp.core.KcpChannel
-import io.github.sensbin.mina.kcp.core.KcpOpt
-import io.github.sensbin.mina.kcp.core.UdpChannel
 import java.net.SocketAddress
 
 /**
@@ -11,15 +8,14 @@ import java.net.SocketAddress
  */
 class KcpClient {
     /**
-     * Connects to a remote address and returns a KcpChannel.
+     * Wraps an existing, connected Channel into a KcpChannel.
      *
-     * @param remoteAddress The remote address to connect to.
+     * @param channel The underlying, already connected channel (e.g., a UdpChannel).
      * @param conv The conversation ID. Must be unique for the client-server pair.
      * @param kcpOpt KCP options for tuning the connection.
      * @return A configured KcpChannel ready for communication.
      */
-    fun connect(remoteAddress: SocketAddress, conv: Long, kcpOpt: KcpOpt = KcpOpt()): KcpChannel {
-        val udpChannel = UdpChannel.connect(remoteAddress)
-        return KcpChannel(conv, udpChannel, kcpOpt)
+    fun wrap(channel: Channel, conv: Long, kcpOpt: KcpOpt = KcpOpt()): KcpChannel {
+        return KcpChannel(conv, channel as UdpChannel, kcpOpt)
     }
 }
