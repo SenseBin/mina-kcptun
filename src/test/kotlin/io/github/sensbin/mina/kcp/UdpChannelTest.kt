@@ -1,5 +1,8 @@
 package io.github.sensbin.mina.kcp
 
+import io.github.sensbin.mina.kcp.core.Channel
+import io.github.sensbin.mina.kcp.core.UdpChannel
+import io.github.sensbin.mina.kcp.core.UdpServerChannel
 import kotlinx.coroutines.*
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.AfterAll

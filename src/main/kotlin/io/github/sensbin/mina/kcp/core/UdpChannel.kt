@@ -1,4 +1,4 @@
-package io.github.sensbin.mina.kcp
+package io.github.sensbin.mina.kcp.core
 
 import kotlinx.coroutines.channels.Channel as KChannel
 import org.apache.mina.core.buffer.IoBuffer
@@ -49,7 +49,7 @@ class UdpChannel(
         if (closed.compareAndSet(false, true)) {
             // UdpServerChannel 会管理 session 的关闭
             // 如果是客户端主动关闭，则需要关闭 session
-            if (session.service is org.apache.mina.transport.socket.nio.NioDatagramConnector) {
+            if (session.service is NioDatagramConnector) {
                 session.closeNow()
             }
             incomingMessages.close()

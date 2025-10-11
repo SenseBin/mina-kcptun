@@ -1,4 +1,4 @@
-package io.github.sensbin.mina.kcp
+package io.github.sensbin.mina.kcp.core
 
 import java.net.SocketAddress
 
