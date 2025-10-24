@@ -18,5 +18,6 @@ data class KcpOpt(
     val nodelay: Int = 0,
     val interval: Int = KCP.IKCP_INTERVAL,
     val resend: Int = 0,
-    val nc: Int = 0
+    val nc: Int = 0,
+    val secret: String = "It's a key",
 )
