@@ -9,25 +9,22 @@ import java.net.SocketAddress
  * This simplifies the process of binding to a port and accepting KCP connections.
  */
 class KcpServer {
-    /**
-     * Binds to a local address and returns a KcpServerChannel.
-     * The returned channel can be used to accept incoming KCP connections.
-     *
-     * @param localAddress The local address to bind to.
-     * @param kcpOpt KCP options that will be applied to all accepted channels.
-     * @return A configured KcpServerChannel.
-     */
-    fun bind(localAddress: SocketAddress, kcpOpt: KcpOpt = KcpOpt()): KcpServerChannelImpl {
+
+    fun bind(
+        localAddress: SocketAddress,
+        targetAddress: SocketAddress,
+        kcpOpt: KcpOpt = KcpOpt(),
+    ): KcpServerChannel {
         val acceptor = NioDatagramAcceptor()
         acceptor.sessionConfig.also {
             it.isBroadcast = false
             it.isReuseAddress = false
-            it.isCloseOnPortUnreachable = true
+            it.isCloseOnPortUnreachable = false
             it.receiveBufferSize = 4096
             it.sendBufferSize = 4096
         }
-        val kcpServerChannel = KcpServerChannelImpl(localAddress, acceptor, kcpOpt)
-        acceptor.filterChain.addLast("logging", LoggingFilter())
+        val kcpServerChannel = KcpServerChannelImpl(localAddress, targetAddress, acceptor, kcpOpt)
+
         acceptor.handler = kcpServerChannel.getSessionHandler()
         acceptor.bind(localAddress)
 

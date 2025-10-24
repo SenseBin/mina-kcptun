@@ -1,5 +1,7 @@
 package io.github.sensbin.mina.kcp.core
 
+import kcp.KCP
+
 /**
  * KCP-specific options.
  *
@@ -12,11 +14,11 @@ package io.github.sensbin.mina.kcp.core
  * @property nc No congestion control. 0 for normal, 1 for disabled.
  */
 data class KcpOpt(
-    val mtu: Int = KCP.IKCP_MTU_DEF,
+    val mtu: Int = 1200,
     val sndWnd: Int = KCP.IKCP_WND_SND,
     val rcvWnd: Int = KCP.IKCP_WND_RCV,
     val nodelay: Int = 0,
-    val interval: Int = KCP.IKCP_INTERVAL,
+    val interval: Long = KCP.IKCP_INTERVAL.toLong(),
     val resend: Int = 0,
     val nc: Int = 0,
     val secret: String = "It's a key",

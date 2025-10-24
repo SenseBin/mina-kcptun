@@ -1,14 +1,13 @@
 package io.github.sensbin.mina.kcp.core
 
+import java.util.concurrent.Future
+
 /**
  * 抽象服务器通道接口，用于监听和接受传入的连接。
  */
 interface KcpServerChannel {
-    /**
-     * 阻塞等待并接受一个新的 Channel。
-     * @return 代表新连接的 Channel
-     */
-    suspend fun accept(): KcpChannel
+
+    fun await(): Future<KcpServerChannel>
 
     /**
      * 关闭服务器通道。

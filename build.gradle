@@ -31,15 +31,14 @@ repositories {
 dependencies {
     implementation "org.jetbrains.kotlin:kotlin-stdlib"
     implementation "org.jetbrains.kotlin:kotlin-reflect"
-    implementation "org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.1"
     implementation group: 'commons-codec', name: 'commons-codec', version: '1.17.0'
     implementation group: 'org.apache.mina', name: 'mina-core', version: '2.2.4'
     implementation "org.xerial.snappy:snappy-java:1.1.10.8"
 
-    testImplementation group: 'org.slf4j', name: 'slf4j-simple', version: '2.0.13'
+    implementation("ch.qos.logback:logback-classic:1.5.20")
+
     testImplementation 'org.junit.jupiter:junit-jupiter-api:5.10.3'
     testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine:5.10.3'
-    testImplementation 'org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.1'
 }
 
 tasks.withType(Test).configureEach {
