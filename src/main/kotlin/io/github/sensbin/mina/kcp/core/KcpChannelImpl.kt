@@ -7,7 +7,6 @@ import java.net.SocketAddress
  * It handles the KCP state machine, including sending, receiving, and updates.
  */
 class KcpChannelImpl internal constructor(
-    private val remoteSocketAddress: SocketAddress
 ) : KcpChannel {
     override suspend fun read(buffer: ByteArray): Int {
         TODO("Not yet implemented")
@@ -28,5 +27,4 @@ class KcpChannelImpl internal constructor(
     override fun isClosed(): Boolean {
         TODO("Not yet implemented")
     }
-
 }
